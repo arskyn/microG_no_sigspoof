@@ -60,16 +60,18 @@ jobs:
         if: steps.check.outputs.published == 'false'
         run: |
           SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          BUILD_TOOLS_VERSION="36.0.0"
 
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$SDK_ROOT/cmdline-tools/16.0/bin" >> "$GITHUB_PATH"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION" >> "$GITHUB_PATH"
 
           if [ ! -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ] && \
              [ ! -x "$SDK_ROOT/cmdline-tools/16.0/bin/sdkmanager" ]; then
-            echo "::error::sdkmanager not found in the Android SDK command-line tools directories."
+            echo "::error::sdkmanager not found."
             ls -la "$SDK_ROOT/cmdline-tools" || true
             exit 1
           fi
