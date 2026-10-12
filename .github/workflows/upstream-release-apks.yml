@@ -1,0 +1,139 @@
+name: Check upstream GmsCore release
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-gmscore-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get latest upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release="$(gh api repos/microg/gmscore/releases/latest)"
+
+          echo "tag=$(jq -r '.tag_name' <<< "$release")" >> "$GITHUB_OUTPUT"
+          echo "name=$(jq -r '.name // .tag_name' <<< "$release")" >> "$GITHUB_OUTPUT"
+          echo "url=$(jq -r '.html_url' <<< "$release")" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this release was already published
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          release_tag="gmscore-${UPSTREAM_TAG}"
+
+          if gh release view "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "Release $release_tag already exists."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "New upstream release detected: $UPSTREAM_TAG"
+          fi
+
+      - name: Check out this repository
+        if: steps.check.outputs.published == 'false'
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        if: steps.check.outputs.published == 'false'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        if: steps.check.outputs.published == 'false'
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Android SDK components
+        if: steps.check.outputs.published == 'false'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/platforms
+            ${{ env.ANDROID_HOME }}/build-tools
+            ${{ env.ANDROID_HOME }}/licenses
+          key: android-sdk-${{ runner.os }}-api35-build36-v1
+
+      - name: Install Android SDK components
+        if: steps.check.outputs.published == 'false'
+        run: |
+          sdkmanager \
+            "platforms;android-35" \
+            "build-tools;36.0.0"
+
+      - name: Set up Python
+        if: steps.check.outputs.published == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Cache pip downloads
+        if: steps.check.outputs.published == 'false'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ runner.arch }}-apksigcopier-v1
+
+      - name: Install build dependencies
+        if: steps.check.outputs.published == 'false'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip wget
+          python3 -m pip install --user apksigcopier
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build Android packages
+        if: steps.check.outputs.published == 'false'
+        run: |
+          make android-package
+
+          test -s GmsCore.apk
+          test -s Phonesky.apk
+          test -s GsfProxy.apk
+
+      - name: Verify upstream release did not change during build
+        if: steps.check.outputs.published == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          actual_tag="$(gh api repos/microg/gmscore/releases/latest \
+            --jq '.tag_name')"
+
+          if [ "$actual_tag" != "$EXPECTED_TAG" ]; then
+            echo "::error::Upstream release changed during the build."
+            echo "Expected $EXPECTED_TAG, got $actual_tag."
+            exit 1
+          fi
+
+      - name: Publish GitHub Release
+        if: steps.check.outputs.published == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+          UPSTREAM_NAME: ${{ steps.upstream.outputs.name }}
+          UPSTREAM_URL: ${{ steps.upstream.outputs.url }}
+        run: |
+          gh release create "gmscore-${UPSTREAM_TAG}" \
+            GmsCore.apk \
+            Phonesky.apk \
+            GsfProxy.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$UPSTREAM_NAME" \
+            --notes "Original microG GmsCore release: ${UPSTREAM_URL}"
