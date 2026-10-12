@@ -76,16 +76,6 @@ jobs:
             exit 1
           fi
 
-      - name: Cache Android SDK components
-        if: steps.check.outputs.published == 'false'
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/lib/android/sdk/platforms
-            /usr/local/lib/android/sdk/build-tools
-            /usr/local/lib/android/sdk/licenses
-          key: android-sdk-${{ runner.os }}-api35-build36-v1
-
       - name: Install Android SDK components
         if: steps.check.outputs.published == 'false'
         run: |
